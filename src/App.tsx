@@ -789,6 +789,19 @@ export default function App() {
     setTimeout(() => setMessage(null), 3000);
   };
 
+  const handleDeleteProject = async (id: number) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer ce projet ?')) return;
+    const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      setMessage({ type: 'success', text: 'Projet supprimé' });
+      fetchProjects();
+    } else {
+      const d = await res.json();
+      setMessage({ type: 'error', text: d.error });
+    }
+    setTimeout(() => setMessage(null), 3000);
+  };
+
   const handleCreateAccount = async () => {
     if (newAccount.code.length !== 6) {
       setMessage({ type: 'error', text: 'Le code compte doit comporter exactement 6 chiffres.' });
@@ -2696,6 +2709,98 @@ export default function App() {
                               <td colSpan={4} className="px-6 py-12 text-center text-gray-400 italic">Aucune ligne budgétaire définie pour ce projet.</td>
                             </tr>
                           )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {referentielView === 'projects' && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* Project Creation */}
+                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5 space-y-6">
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                      <Plus className="w-5 h-5 text-emerald-600" />
+                      Nouveau Projet
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">Code Projet</label>
+                        <input 
+                          type="text" 
+                          value={newProject.code}
+                          onChange={(e) => setNewProject({...newProject, code: e.target.value})}
+                          className="w-full p-3 bg-gray-50 rounded-xl border border-black/5 text-sm focus:outline-none"
+                          placeholder="P002"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">Nom du Projet</label>
+                        <input 
+                          type="text" 
+                          value={newProject.name}
+                          onChange={(e) => setNewProject({...newProject, name: e.target.value})}
+                          className="w-full p-3 bg-gray-50 rounded-xl border border-black/5 text-sm focus:outline-none"
+                          placeholder="Nom du projet"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">Description</label>
+                        <textarea 
+                          value={newProject.description}
+                          onChange={(e) => setNewProject({...newProject, description: e.target.value})}
+                          className="w-full p-3 bg-gray-50 rounded-xl border border-black/5 text-sm focus:outline-none h-24 resize-none"
+                          placeholder="Description du projet..."
+                        />
+                      </div>
+                      <button 
+                        onClick={handleCreateProject}
+                        className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all"
+                      >
+                        Créer le Projet
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Projects List */}
+                  <div className="lg:col-span-2 bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
+                    <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
+                      <h3 className="font-bold">Liste des Projets</h3>
+                      <span className="text-xs text-gray-400 font-medium">{projects.length} projets enregistrés</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead className="bg-gray-50/50 border-b border-black/5">
+                          <tr>
+                            <th className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Code</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Nom</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Description</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {projects.map(p => (
+                            <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-6 py-4 text-sm font-mono font-bold text-emerald-600">{p.code}</td>
+                              <td className="px-6 py-4 text-sm font-medium">{p.name}</td>
+                              <td className="px-6 py-4 text-xs text-gray-500 max-w-xs truncate">{p.description}</td>
+                              <td className="px-6 py-4 text-right space-x-2">
+                                <button 
+                                  onClick={() => setEditingProject(p)}
+                                  className="p-2 text-blue-400 hover:text-blue-600 transition-colors"
+                                >
+                                  <Settings className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteProject(p.id)}
+                                  className="p-2 text-gray-300 hover:text-red-500 transition-colors"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
