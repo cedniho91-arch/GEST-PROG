@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
+import { supabaseService } from './services/supabaseService';
 
 type Project = {
   id: number;
@@ -161,6 +162,7 @@ export default function App() {
   const [subsidiaryTierId, setSubsidiaryTierId] = useState<number>(0);
   const [reportProjectId, setReportProjectId] = useState<string>('all');
   const [isExporting, setIsExporting] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
   const [tierSearch, setTierSearch] = useState('');
   
@@ -267,6 +269,35 @@ export default function App() {
   const fetchConsultationEntries = async () => {
     if (!entryJournalId) return;
     try {
+      if (supabaseStatus === 'connected') {
+        try {
+          let query = supabase
+            .from('journal_entries')
+            .select('*, projects(name), journals(name, code)')
+            .eq('journal_id', entryJournalId);
+          
+          if (entryProjectId && entryProjectId !== 0) {
+            query = query.eq('project_id', entryProjectId);
+          }
+          
+          const { data, error } = await query
+            .order('date', { ascending: false })
+            .order('id', { ascending: false });
+            
+          if (!error && data && data.length > 0) {
+            const formatted = data.map((je: any) => ({
+              ...je,
+              project_name: je.projects?.name,
+              journal_name: je.journals?.name,
+              journal_code: je.journals?.code
+            }));
+            setConsultationEntries(formatted);
+            return;
+          }
+        } catch (se) {
+          console.warn("Supabase entries fetch failed", se);
+        }
+      }
       const res = await fetch(`/api/journal-entries?journalId=${entryJournalId}&projectId=${entryProjectId || 'all'}`);
       const data = await res.json();
       setConsultationEntries(data);
@@ -348,6 +379,17 @@ export default function App() {
 
   const fetchClosedPeriods = async (projectId: number) => {
     try {
+      if (supabaseStatus === 'connected') {
+        try {
+          const { data, error } = await supabase.from('closed_periods').select('*').eq('project_id', projectId);
+          if (!error && data && data.length > 0) {
+            setClosedPeriods(data);
+            return;
+          }
+        } catch (se) {
+          console.warn("Supabase closed periods fetch failed", se);
+        }
+      }
       const res = await fetch(`/api/projects/closed-periods/${projectId}`);
       const data = await res.json();
       setClosedPeriods(data);
@@ -378,6 +420,19 @@ export default function App() {
 
   const fetchBudgetLines = async (projectId: number, year?: number) => {
     try {
+      if (supabaseStatus === 'connected') {
+        try {
+          let query = supabase.from('budget_lines').select('*').eq('project_id', projectId);
+          if (year) query = query.eq('year', year);
+          const { data, error } = await query;
+          if (!error && data && data.length > 0) {
+            setBudgetLines(data);
+            return;
+          }
+        } catch (se) {
+          console.warn("Supabase budget lines fetch failed", se);
+        }
+      }
       const res = await fetch(`/api/budget-lines/${projectId}${year ? `?year=${year}` : ''}`);
       const data = await res.json();
       setBudgetLines(data);
@@ -388,6 +443,20 @@ export default function App() {
 
   const fetchProjects = async () => {
     try {
+      // Try Supabase first if connected
+      if (supabaseStatus === 'connected') {
+        try {
+          const supabaseProjects = await supabaseService.getProjects();
+          if (supabaseProjects && supabaseProjects.length > 0) {
+            setProjects(supabaseProjects);
+            if (supabaseProjects.length > 0 && !selectedProject) setSelectedProject(supabaseProjects[0]);
+            return;
+          }
+        } catch (se) {
+          console.warn("Supabase projects fetch failed, falling back to local", se);
+        }
+      }
+
       const res = await fetch('/api/projects');
       const data = await res.json();
       setProjects(data);
@@ -399,6 +468,19 @@ export default function App() {
 
   const fetchUsers = async () => {
     try {
+      // Try Supabase first if connected
+      if (supabaseStatus === 'connected') {
+        try {
+          const supabaseUsers = await supabaseService.getUsers();
+          if (supabaseUsers && supabaseUsers.length > 0) {
+            setUsers(supabaseUsers);
+            return;
+          }
+        } catch (se) {
+          console.warn("Supabase users fetch failed, falling back to local", se);
+        }
+      }
+
       const res = await fetch('/api/users');
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -415,6 +497,17 @@ export default function App() {
 
   const fetchAccounts = async () => {
     try {
+      if (supabaseStatus === 'connected') {
+        try {
+          const data = await supabaseService.getData('accounts') as any[];
+          if (data && data.length > 0) {
+            setAccounts(data);
+            return;
+          }
+        } catch (se) {
+          console.warn("Supabase accounts fetch failed", se);
+        }
+      }
       const res = await fetch('/api/accounts');
       const data = await res.json();
       setAccounts(data);
@@ -425,6 +518,18 @@ export default function App() {
 
   const fetchJournals = async () => {
     try {
+      if (supabaseStatus === 'connected') {
+        try {
+          const data = await supabaseService.getData('journals') as any[];
+          if (data && data.length > 0) {
+            setJournals(data);
+            if (data.length > 0) setEntryJournalId(data[0].id);
+            return;
+          }
+        } catch (se) {
+          console.warn("Supabase journals fetch failed", se);
+        }
+      }
       const res = await fetch('/api/journals');
       const data = await res.json();
       setJournals(data);
@@ -436,6 +541,21 @@ export default function App() {
 
   const fetchTiers = async () => {
     try {
+      if (supabaseStatus === 'connected') {
+        try {
+          const data = await supabaseService.getData('tiers', '*, accounts(code)') as any[];
+          if (data && data.length > 0) {
+            const formatted = data.map((t: any) => ({
+              ...t,
+              account_code: t.accounts?.code
+            }));
+            setTiers(formatted);
+            return;
+          }
+        } catch (se) {
+          console.warn("Supabase tiers fetch failed", se);
+        }
+      }
       const res = await fetch('/api/tiers');
       const data = await res.json();
       setTiers(data);
@@ -635,6 +755,53 @@ export default function App() {
     }
   };
 
+  const handleMigrateToSupabase = async () => {
+    if (supabaseStatus !== 'connected') {
+      setMessage({ text: "Supabase n'est pas connecté. Vérifiez vos identifiants.", type: 'error' });
+      return;
+    }
+    
+    if (!confirm("Voulez-vous migrer TOUTES les données locales (écritures, comptes, projets, etc.) vers Supabase ? Les données existantes sur Supabase seront mises à jour.")) return;
+    
+    setIsMigrating(true);
+    try {
+      // 1. Get all local data
+      const response = await fetch('/api/backup');
+      const allData = await response.json();
+      
+      if (allData.error) throw new Error(allData.error);
+
+      // 2. Migrate each table in order to respect foreign keys (roughly)
+      const tables = [
+        'users', 
+        'projects', 
+        'accounts', 
+        'journals', 
+        'donors', 
+        'budget_lines', 
+        'tiers', 
+        'closed_periods', 
+        'journal_entries', 
+        'transactions'
+      ];
+
+      for (const table of tables) {
+        if (allData[table] && allData[table].length > 0) {
+          console.log(`Migrating ${table}...`);
+          await supabaseService.migrateData(table, allData[table]);
+        }
+      }
+      
+      setMessage({ text: "Migration complète vers Supabase réussie !", type: 'success' });
+    } catch (e: any) {
+      console.error("Migration error:", e);
+      setMessage({ text: `Erreur de migration: ${e.message}`, type: 'error' });
+    } finally {
+      setIsMigrating(false);
+      setTimeout(() => setMessage(null), 5000);
+    }
+  };
+
   const exportToExcel = (data: any[], fileName: string) => {
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
@@ -795,18 +962,27 @@ export default function App() {
   };
 
   const handleCreateProject = async () => {
-    const res = await fetch('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newProject)
-    });
-    if (res.ok) {
-      setMessage({ type: 'success', text: 'Projet créé avec succès' });
-      setNewProject({ code: '', name: '', description: '' });
-      fetchProjects();
-    } else {
-      const d = await res.json();
-      setMessage({ type: 'error', text: d.error });
+    try {
+      if (supabaseStatus === 'connected') {
+        await supabaseService.saveData('projects', newProject);
+      }
+      
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProject)
+      });
+      
+      if (res.ok) {
+        setMessage({ type: 'success', text: 'Projet créé avec succès' });
+        setNewProject({ code: '', name: '', description: '', start_date: '', end_date: '' });
+        fetchProjects();
+      } else {
+        const d = await res.json();
+        setMessage({ type: 'error', text: d.error });
+      }
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e.message });
     }
     setTimeout(() => setMessage(null), 3000);
   };
@@ -904,18 +1080,27 @@ export default function App() {
   };
 
   const handleCreateUser = async () => {
-    const res = await fetch('/api/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newUser)
-    });
-    if (res.ok) {
-      setMessage({ type: 'success', text: 'Utilisateur créé' });
-      setNewUser({ username: '', password: '', role: 'COMPTABLE' });
-      fetchUsers();
-    } else {
-      const d = await res.json();
-      setMessage({ type: 'error', text: d.error });
+    try {
+      if (supabaseStatus === 'connected') {
+        await supabaseService.saveData('users', newUser);
+      }
+      
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser)
+      });
+      
+      if (res.ok) {
+        setMessage({ type: 'success', text: 'Utilisateur créé' });
+        setNewUser({ username: '', password: '', role: 'COMPTABLE' });
+        fetchUsers();
+      } else {
+        const d = await res.json();
+        setMessage({ type: 'error', text: d.error });
+      }
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e.message });
     }
     setTimeout(() => setMessage(null), 3000);
   };
@@ -3041,6 +3226,24 @@ export default function App() {
                         <Plus className="w-4 h-4" /> Sauvegarder
                       </button>
                     </div>
+
+                    {currentUser.role === 'ADMIN' && (
+                      <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 space-y-3">
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-emerald-600 flex items-center gap-2">
+                          <Database className="w-4 h-4" /> Cloud Supabase
+                        </h4>
+                        <p className="text-[10px] text-emerald-700">Synchronisez vos utilisateurs et projets avec votre base de données Cloud.</p>
+                        <button 
+                          onClick={handleMigrateToSupabase}
+                          disabled={isMigrating || supabaseStatus !== 'connected'}
+                          className={`w-full py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+                            isMigrating ? 'bg-emerald-200 text-emerald-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                          }`}
+                        >
+                          {isMigrating ? 'Migration en cours...' : 'Migrer vers Supabase'}
+                        </button>
+                      </div>
+                    )}
 
                     {currentUser.role === 'ADMIN' && (
                       <div className="p-4 bg-red-50 rounded-2xl border border-red-100 space-y-3">

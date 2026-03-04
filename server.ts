@@ -7,196 +7,203 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("accounting.db");
+let db: any;
 
-// Initialize Database
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE,
-    password TEXT,
-    role TEXT DEFAULT 'COMPTABLE',
-    is_active INTEGER DEFAULT 1,
-    password_updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS projects (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT UNIQUE,
-    name TEXT,
-    description TEXT,
-    start_date TEXT,
-    end_date TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS journals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT UNIQUE,
-    name TEXT,
-    type TEXT DEFAULT 'GENERAL', -- 'GENERAL', 'TREASURY'
-    treasury_account_id INTEGER,
-    FOREIGN KEY(treasury_account_id) REFERENCES accounts(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS donors (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    contact TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS budget_lines (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER,
-    code TEXT,
-    name TEXT,
-    allocated_amount REAL,
-    year INTEGER DEFAULT 2026,
-    FOREIGN KEY(project_id) REFERENCES projects(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS closed_periods (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER,
-    type TEXT, -- 'MONTH', 'YEAR'
-    period TEXT, -- 'YYYY-MM' or 'YYYY'
-    closed_at TEXT,
-    FOREIGN KEY(project_id) REFERENCES projects(id),
-    UNIQUE(project_id, type, period)
-  );
-
-  CREATE TABLE IF NOT EXISTS accounts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT UNIQUE,
-    name TEXT,
-    class INTEGER
-  );
-
-  CREATE TABLE IF NOT EXISTS tiers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT UNIQUE,
-    name TEXT,
-    type TEXT DEFAULT 'OTHER', -- 'SUPPLIER', 'CUSTOMER', 'EMPLOYEE', 'OTHER'
-    account_id INTEGER,
-    FOREIGN KEY(account_id) REFERENCES accounts(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS journal_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT,
-    reference TEXT UNIQUE,
-    description TEXT,
-    project_id INTEGER,
-    journal_id INTEGER,
-    FOREIGN KEY(project_id) REFERENCES projects(id),
-    FOREIGN KEY(journal_id) REFERENCES journals(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entry_id INTEGER,
-    account_id INTEGER,
-    budget_line_id INTEGER,
-    debit REAL DEFAULT 0,
-    credit REAL DEFAULT 0,
-    letter TEXT, -- For lettering (matching)
-    FOREIGN KEY(entry_id) REFERENCES journal_entries(id),
-    FOREIGN KEY(account_id) REFERENCES accounts(id),
-    FOREIGN KEY(budget_line_id) REFERENCES budget_lines(id)
-  );
-`);
-
-// Migrations for existing databases
-const migrate = () => {
-  const tables = ['users', 'projects', 'journals', 'transactions', 'budget_lines'];
-  
-  tables.forEach(table => {
-    try {
-      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
-      const columnNames = columns.map(c => c.name);
-      
-      if (table === 'users') {
-        if (!columnNames.includes('is_active')) {
-          console.log("Adding is_active column to users table");
-          db.exec("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1");
-        }
-        if (!columnNames.includes('password_updated_at')) {
-          console.log("Adding password_updated_at column to users table");
-          db.exec("ALTER TABLE users ADD COLUMN password_updated_at TEXT DEFAULT '2026-01-01 00:00:00'");
-          db.exec("UPDATE users SET password_updated_at = CURRENT_TIMESTAMP WHERE password_updated_at = '2026-01-01 00:00:00'");
-        }
-      }
-      
-      if (table === 'projects') {
-        if (!columnNames.includes('code')) {
-          db.exec("ALTER TABLE projects ADD COLUMN code TEXT UNIQUE");
-        }
-        if (!columnNames.includes('start_date')) {
-          db.exec("ALTER TABLE projects ADD COLUMN start_date TEXT");
-        }
-        if (!columnNames.includes('end_date')) {
-          db.exec("ALTER TABLE projects ADD COLUMN end_date TEXT");
-        }
-      }
-
-      if (table === 'journals') {
-        if (!columnNames.includes('type')) {
-          db.exec("ALTER TABLE journals ADD COLUMN type TEXT DEFAULT 'GENERAL'");
-        }
-        if (!columnNames.includes('treasury_account_id')) {
-          db.exec("ALTER TABLE journals ADD COLUMN treasury_account_id INTEGER REFERENCES accounts(id)");
-        }
-      }
-
-      if (table === 'transactions') {
-        if (!columnNames.includes('budget_line_id')) {
-          db.exec("ALTER TABLE transactions ADD COLUMN budget_line_id INTEGER REFERENCES budget_lines(id)");
-        }
-        if (!columnNames.includes('letter')) {
-          db.exec("ALTER TABLE transactions ADD COLUMN letter TEXT");
-        }
-        if (!columnNames.includes('tier_id')) {
-          db.exec("ALTER TABLE transactions ADD COLUMN tier_id INTEGER REFERENCES tiers(id)");
-        }
-      }
-
-      if (table === 'budget_lines') {
-        if (!columnNames.includes('year')) {
-          db.exec("ALTER TABLE budget_lines ADD COLUMN year INTEGER DEFAULT 2026");
-        }
-      }
-    } catch (e) {
-      console.error(`Migration failed for table ${table}:`, e);
-    }
-  });
-};
-
-migrate();
-
-// Verify users table schema
-const verifySchema = () => {
-  const columns = db.prepare("PRAGMA table_info(users)").all() as any[];
-  const columnNames = columns.map(c => c.name);
-  console.log("Users table columns:", columnNames);
-  if (!columnNames.includes('password_updated_at')) {
-    console.error("CRITICAL: password_updated_at column missing after migration!");
-    // Try one last time to add it
-    try {
-      db.exec("ALTER TABLE users ADD COLUMN password_updated_at TEXT DEFAULT '2026-01-01 00:00:00'");
-      db.exec("UPDATE users SET password_updated_at = CURRENT_TIMESTAMP WHERE password_updated_at = '2026-01-01 00:00:00'");
-      console.log("Successfully added password_updated_at in emergency fallback");
-    } catch (e) {
-      console.error("Emergency fallback failed:", e);
-    }
+async function startServer() {
+  try {
+    db = new Database("accounting.db");
+    console.log("Database initialized successfully");
+  } catch (err) {
+    console.error("Failed to initialize database:", err);
+    process.exit(1);
   }
-};
-verifySchema();
+
+  // Initialize Database
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE,
+      password TEXT,
+      role TEXT DEFAULT 'COMPTABLE',
+      is_active INTEGER DEFAULT 1,
+      password_updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE,
+      name TEXT,
+      description TEXT,
+      start_date TEXT,
+      end_date TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS journals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE,
+      name TEXT,
+      type TEXT DEFAULT 'GENERAL', -- 'GENERAL', 'TREASURY'
+      treasury_account_id INTEGER,
+      FOREIGN KEY(treasury_account_id) REFERENCES accounts(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS donors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      contact TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS budget_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER,
+      code TEXT,
+      name TEXT,
+      allocated_amount REAL,
+      year INTEGER DEFAULT 2026,
+      FOREIGN KEY(project_id) REFERENCES projects(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS closed_periods (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER,
+      type TEXT, -- 'MONTH', 'YEAR'
+      period TEXT, -- 'YYYY-MM' or 'YYYY'
+      closed_at TEXT,
+      FOREIGN KEY(project_id) REFERENCES projects(id),
+      UNIQUE(project_id, type, period)
+    );
+
+    CREATE TABLE IF NOT EXISTS accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE,
+      name TEXT,
+      class INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS tiers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE,
+      name TEXT,
+      type TEXT DEFAULT 'OTHER', -- 'SUPPLIER', 'CUSTOMER', 'EMPLOYEE', 'OTHER'
+      account_id INTEGER,
+      FOREIGN KEY(account_id) REFERENCES accounts(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS journal_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT,
+      reference TEXT UNIQUE,
+      description TEXT,
+      project_id INTEGER,
+      journal_id INTEGER,
+      FOREIGN KEY(project_id) REFERENCES projects(id),
+      FOREIGN KEY(journal_id) REFERENCES journals(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_id INTEGER,
+      account_id INTEGER,
+      budget_line_id INTEGER,
+      debit REAL DEFAULT 0,
+      credit REAL DEFAULT 0,
+      letter TEXT, -- For lettering (matching)
+      FOREIGN KEY(entry_id) REFERENCES journal_entries(id),
+      FOREIGN KEY(account_id) REFERENCES accounts(id),
+      FOREIGN KEY(budget_line_id) REFERENCES budget_lines(id)
+    );
+  `);
+
+  // Migrations for existing databases
+  const migrate = () => {
+    const tables = ['users', 'projects', 'journals', 'transactions', 'budget_lines'];
+    
+    tables.forEach(table => {
+      try {
+        const columns = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
+        const columnNames = columns.map(c => c.name);
+        
+        if (table === 'users') {
+          if (!columnNames.includes('is_active')) {
+            console.log("Adding is_active column to users table");
+            db.exec("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1");
+          }
+          if (!columnNames.includes('password_updated_at')) {
+            console.log("Adding password_updated_at column to users table");
+            db.exec("ALTER TABLE users ADD COLUMN password_updated_at TEXT DEFAULT '2026-01-01 00:00:00'");
+            db.exec("UPDATE users SET password_updated_at = CURRENT_TIMESTAMP WHERE password_updated_at = '2026-01-01 00:00:00'");
+          }
+        }
+        
+        if (table === 'projects') {
+          if (!columnNames.includes('code')) {
+            db.exec("ALTER TABLE projects ADD COLUMN code TEXT UNIQUE");
+          }
+          if (!columnNames.includes('start_date')) {
+            db.exec("ALTER TABLE projects ADD COLUMN start_date TEXT");
+          }
+          if (!columnNames.includes('end_date')) {
+            db.exec("ALTER TABLE projects ADD COLUMN end_date TEXT");
+          }
+        }
+
+        if (table === 'journals') {
+          if (!columnNames.includes('type')) {
+            db.exec("ALTER TABLE journals ADD COLUMN type TEXT DEFAULT 'GENERAL'");
+          }
+          if (!columnNames.includes('treasury_account_id')) {
+            db.exec("ALTER TABLE journals ADD COLUMN treasury_account_id INTEGER REFERENCES accounts(id)");
+          }
+        }
+
+        if (table === 'transactions') {
+          if (!columnNames.includes('budget_line_id')) {
+            db.exec("ALTER TABLE transactions ADD COLUMN budget_line_id INTEGER REFERENCES budget_lines(id)");
+          }
+          if (!columnNames.includes('letter')) {
+            db.exec("ALTER TABLE transactions ADD COLUMN letter TEXT");
+          }
+          if (!columnNames.includes('tier_id')) {
+            db.exec("ALTER TABLE transactions ADD COLUMN tier_id INTEGER REFERENCES tiers(id)");
+          }
+        }
+
+        if (table === 'budget_lines') {
+          if (!columnNames.includes('year')) {
+            db.exec("ALTER TABLE budget_lines ADD COLUMN year INTEGER DEFAULT 2026");
+          }
+        }
+      } catch (e) {
+        console.error(`Migration failed for table ${table}:`, e);
+      }
+    });
+  };
+
+  migrate();
+
+  // Verify users table schema
+  const verifySchema = () => {
+    const columns = db.prepare("PRAGMA table_info(users)").all() as any[];
+    const columnNames = columns.map(c => c.name);
+    console.log("Users table columns:", columnNames);
+    if (!columnNames.includes('password_updated_at')) {
+      console.error("CRITICAL: password_updated_at column missing after migration!");
+      try {
+        db.exec("ALTER TABLE users ADD COLUMN password_updated_at TEXT DEFAULT '2026-01-01 00:00:00'");
+        db.exec("UPDATE users SET password_updated_at = CURRENT_TIMESTAMP WHERE password_updated_at = '2026-01-01 00:00:00'");
+        console.log("Successfully added password_updated_at in emergency fallback");
+      } catch (e) {
+        console.error("Emergency fallback failed:", e);
+      }
+    }
+  };
+  verifySchema();
 
   // Seed initial data if empty
   const userCount = db.prepare("SELECT count(*) as count FROM users").get() as { count: number };
   if (userCount.count === 0) {
     db.prepare("INSERT INTO users (username, password, role, is_active, password_updated_at) VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)").run("admin", "admin", "ADMIN");
     
-    // Seed journals
     const journals = [
       { code: "GEN", name: "Journal Général" },
       { code: "CAI", name: "Journal de Caisse" },
@@ -206,7 +213,6 @@ verifySchema();
     const insertJournal = db.prepare("INSERT INTO journals (code, name) VALUES (?, ?)");
     journals.forEach(j => insertJournal.run(j.code, j.name));
 
-    // Seed some SYSCOHADA accounts
     const accounts = [
       { code: "101", name: "Capital", class: 1 },
       { code: "211", name: "Terrains", class: 2 },
@@ -225,11 +231,15 @@ verifySchema();
     db.prepare("INSERT INTO budget_lines (project_id, code, name, allocated_amount) VALUES (?, ?, ?, ?)").run(1, "B01", "Frais de personnel", 5000000);
   }
 
-async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Health check
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", database: "sqlite" });
+  });
 
   // API Routes
   // Authentication
@@ -1014,8 +1024,11 @@ async function startServer() {
   });
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});
