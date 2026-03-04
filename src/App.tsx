@@ -27,11 +27,10 @@ import {
   Lock,
   Calendar,
   BookMarked,
-  Database
+  Share2,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { supabase } from './lib/supabase';
-import { supabaseService } from './services/supabaseService';
 
 type Project = {
   id: number;
@@ -101,26 +100,6 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [passwordExpired, setPasswordExpired] = useState(false);
-  const [supabaseStatus, setSupabaseStatus] = useState<'connected' | 'error' | 'checking'>('checking');
-
-  useEffect(() => {
-    async function checkSupabase() {
-      try {
-        const { data, error } = await supabase.from('health_check').select('*').limit(1);
-        // Even if the table doesn't exist, if we get a response (even an error about the table), 
-        // it means the connection to the project is working.
-        // But a better check is just to see if the URL is valid.
-        if (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY) {
-          setSupabaseStatus('connected');
-        } else {
-          setSupabaseStatus('error');
-        }
-      } catch (e) {
-        setSupabaseStatus('error');
-      }
-    }
-    checkSupabase();
-  }, []);
   const [newPassword, setNewPassword] = useState('');
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'journal' | 'accounts' | 'reports' | 'config' | 'budget' | 'cloture' | 'users' | 'referentiels' | 'lettering'>('dashboard');
@@ -162,7 +141,6 @@ export default function App() {
   const [subsidiaryTierId, setSubsidiaryTierId] = useState<number>(0);
   const [reportProjectId, setReportProjectId] = useState<string>('all');
   const [isExporting, setIsExporting] = useState(false);
-  const [isMigrating, setIsMigrating] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
   const [tierSearch, setTierSearch] = useState('');
   
@@ -269,35 +247,6 @@ export default function App() {
   const fetchConsultationEntries = async () => {
     if (!entryJournalId) return;
     try {
-      if (supabaseStatus === 'connected') {
-        try {
-          let query = supabase
-            .from('journal_entries')
-            .select('*, projects(name), journals(name, code)')
-            .eq('journal_id', entryJournalId);
-          
-          if (entryProjectId && entryProjectId !== 0) {
-            query = query.eq('project_id', entryProjectId);
-          }
-          
-          const { data, error } = await query
-            .order('date', { ascending: false })
-            .order('id', { ascending: false });
-            
-          if (!error && data && data.length > 0) {
-            const formatted = data.map((je: any) => ({
-              ...je,
-              project_name: je.projects?.name,
-              journal_name: je.journals?.name,
-              journal_code: je.journals?.code
-            }));
-            setConsultationEntries(formatted);
-            return;
-          }
-        } catch (se) {
-          console.warn("Supabase entries fetch failed", se);
-        }
-      }
       const res = await fetch(`/api/journal-entries?journalId=${entryJournalId}&projectId=${entryProjectId || 'all'}`);
       const data = await res.json();
       setConsultationEntries(data);
@@ -379,17 +328,6 @@ export default function App() {
 
   const fetchClosedPeriods = async (projectId: number) => {
     try {
-      if (supabaseStatus === 'connected') {
-        try {
-          const { data, error } = await supabase.from('closed_periods').select('*').eq('project_id', projectId);
-          if (!error && data && data.length > 0) {
-            setClosedPeriods(data);
-            return;
-          }
-        } catch (se) {
-          console.warn("Supabase closed periods fetch failed", se);
-        }
-      }
       const res = await fetch(`/api/projects/closed-periods/${projectId}`);
       const data = await res.json();
       setClosedPeriods(data);
@@ -420,19 +358,6 @@ export default function App() {
 
   const fetchBudgetLines = async (projectId: number, year?: number) => {
     try {
-      if (supabaseStatus === 'connected') {
-        try {
-          let query = supabase.from('budget_lines').select('*').eq('project_id', projectId);
-          if (year) query = query.eq('year', year);
-          const { data, error } = await query;
-          if (!error && data && data.length > 0) {
-            setBudgetLines(data);
-            return;
-          }
-        } catch (se) {
-          console.warn("Supabase budget lines fetch failed", se);
-        }
-      }
       const res = await fetch(`/api/budget-lines/${projectId}${year ? `?year=${year}` : ''}`);
       const data = await res.json();
       setBudgetLines(data);
@@ -443,20 +368,6 @@ export default function App() {
 
   const fetchProjects = async () => {
     try {
-      // Try Supabase first if connected
-      if (supabaseStatus === 'connected') {
-        try {
-          const supabaseProjects = await supabaseService.getProjects();
-          if (supabaseProjects && supabaseProjects.length > 0) {
-            setProjects(supabaseProjects);
-            if (supabaseProjects.length > 0 && !selectedProject) setSelectedProject(supabaseProjects[0]);
-            return;
-          }
-        } catch (se) {
-          console.warn("Supabase projects fetch failed, falling back to local", se);
-        }
-      }
-
       const res = await fetch('/api/projects');
       const data = await res.json();
       setProjects(data);
@@ -468,19 +379,6 @@ export default function App() {
 
   const fetchUsers = async () => {
     try {
-      // Try Supabase first if connected
-      if (supabaseStatus === 'connected') {
-        try {
-          const supabaseUsers = await supabaseService.getUsers();
-          if (supabaseUsers && supabaseUsers.length > 0) {
-            setUsers(supabaseUsers);
-            return;
-          }
-        } catch (se) {
-          console.warn("Supabase users fetch failed, falling back to local", se);
-        }
-      }
-
       const res = await fetch('/api/users');
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -497,17 +395,6 @@ export default function App() {
 
   const fetchAccounts = async () => {
     try {
-      if (supabaseStatus === 'connected') {
-        try {
-          const data = await supabaseService.getData('accounts') as any[];
-          if (data && data.length > 0) {
-            setAccounts(data);
-            return;
-          }
-        } catch (se) {
-          console.warn("Supabase accounts fetch failed", se);
-        }
-      }
       const res = await fetch('/api/accounts');
       const data = await res.json();
       setAccounts(data);
@@ -518,18 +405,6 @@ export default function App() {
 
   const fetchJournals = async () => {
     try {
-      if (supabaseStatus === 'connected') {
-        try {
-          const data = await supabaseService.getData('journals') as any[];
-          if (data && data.length > 0) {
-            setJournals(data);
-            if (data.length > 0) setEntryJournalId(data[0].id);
-            return;
-          }
-        } catch (se) {
-          console.warn("Supabase journals fetch failed", se);
-        }
-      }
       const res = await fetch('/api/journals');
       const data = await res.json();
       setJournals(data);
@@ -541,21 +416,6 @@ export default function App() {
 
   const fetchTiers = async () => {
     try {
-      if (supabaseStatus === 'connected') {
-        try {
-          const data = await supabaseService.getData('tiers', '*, accounts(code)') as any[];
-          if (data && data.length > 0) {
-            const formatted = data.map((t: any) => ({
-              ...t,
-              account_code: t.accounts?.code
-            }));
-            setTiers(formatted);
-            return;
-          }
-        } catch (se) {
-          console.warn("Supabase tiers fetch failed", se);
-        }
-      }
       const res = await fetch('/api/tiers');
       const data = await res.json();
       setTiers(data);
@@ -755,53 +615,6 @@ export default function App() {
     }
   };
 
-  const handleMigrateToSupabase = async () => {
-    if (supabaseStatus !== 'connected') {
-      setMessage({ text: "Supabase n'est pas connecté. Vérifiez vos identifiants.", type: 'error' });
-      return;
-    }
-    
-    if (!confirm("Voulez-vous migrer TOUTES les données locales (écritures, comptes, projets, etc.) vers Supabase ? Les données existantes sur Supabase seront mises à jour.")) return;
-    
-    setIsMigrating(true);
-    try {
-      // 1. Get all local data
-      const response = await fetch('/api/backup');
-      const allData = await response.json();
-      
-      if (allData.error) throw new Error(allData.error);
-
-      // 2. Migrate each table in order to respect foreign keys (roughly)
-      const tables = [
-        'users', 
-        'projects', 
-        'accounts', 
-        'journals', 
-        'donors', 
-        'budget_lines', 
-        'tiers', 
-        'closed_periods', 
-        'journal_entries', 
-        'transactions'
-      ];
-
-      for (const table of tables) {
-        if (allData[table] && allData[table].length > 0) {
-          console.log(`Migrating ${table}...`);
-          await supabaseService.migrateData(table, allData[table]);
-        }
-      }
-      
-      setMessage({ text: "Migration complète vers Supabase réussie !", type: 'success' });
-    } catch (e: any) {
-      console.error("Migration error:", e);
-      setMessage({ text: `Erreur de migration: ${e.message}`, type: 'error' });
-    } finally {
-      setIsMigrating(false);
-      setTimeout(() => setMessage(null), 5000);
-    }
-  };
-
   const exportToExcel = (data: any[], fileName: string) => {
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
@@ -962,27 +775,18 @@ export default function App() {
   };
 
   const handleCreateProject = async () => {
-    try {
-      if (supabaseStatus === 'connected') {
-        await supabaseService.saveData('projects', newProject);
-      }
-      
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProject)
-      });
-      
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Projet créé avec succès' });
-        setNewProject({ code: '', name: '', description: '', start_date: '', end_date: '' });
-        fetchProjects();
-      } else {
-        const d = await res.json();
-        setMessage({ type: 'error', text: d.error });
-      }
-    } catch (e: any) {
-      setMessage({ type: 'error', text: e.message });
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newProject)
+    });
+    if (res.ok) {
+      setMessage({ type: 'success', text: 'Projet créé avec succès' });
+      setNewProject({ code: '', name: '', description: '' });
+      fetchProjects();
+    } else {
+      const d = await res.json();
+      setMessage({ type: 'error', text: d.error });
     }
     setTimeout(() => setMessage(null), 3000);
   };
@@ -1080,27 +884,18 @@ export default function App() {
   };
 
   const handleCreateUser = async () => {
-    try {
-      if (supabaseStatus === 'connected') {
-        await supabaseService.saveData('users', newUser);
-      }
-      
-      const res = await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newUser)
-      });
-      
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Utilisateur créé' });
-        setNewUser({ username: '', password: '', role: 'COMPTABLE' });
-        fetchUsers();
-      } else {
-        const d = await res.json();
-        setMessage({ type: 'error', text: d.error });
-      }
-    } catch (e: any) {
-      setMessage({ type: 'error', text: e.message });
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newUser)
+    });
+    if (res.ok) {
+      setMessage({ type: 'success', text: 'Utilisateur créé' });
+      setNewUser({ username: '', password: '', role: 'COMPTABLE' });
+      fetchUsers();
+    } else {
+      const d = await res.json();
+      setMessage({ type: 'error', text: d.error });
     }
     setTimeout(() => setMessage(null), 3000);
   };
@@ -1395,23 +1190,23 @@ export default function App() {
               Utilisateurs
             </button>
           )}
+          <div className="pt-2 mt-2 border-t border-gray-100">
+            <button 
+              onClick={() => {
+                const url = window.location.origin;
+                navigator.clipboard.writeText(url);
+                setMessage({ type: 'success', text: 'Lien de partage copié !' });
+                setTimeout(() => setMessage(null), 3000);
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all hover:bg-blue-50 text-blue-600 font-medium"
+            >
+              <Share2 className="w-5 h-5" />
+              Partager l'App
+            </button>
+          </div>
         </nav>
 
-        <div className="p-4 border-t border-[#1A1A1A]/10 space-y-3">
-          <div className={`flex items-center justify-between px-3 py-2 rounded-xl border ${
-            supabaseStatus === 'connected' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 
-            supabaseStatus === 'error' ? 'bg-red-50 border-red-100 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-500'
-          }`}>
-            <div className="flex items-center gap-2">
-              <Database className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Supabase</span>
-            </div>
-            <div className={`w-1.5 h-1.5 rounded-full ${
-              supabaseStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 
-              supabaseStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
-            }`} />
-          </div>
-
+        <div className="p-4 border-t border-[#1A1A1A]/10">
           <div className="bg-gray-50 p-3 rounded-xl">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Session</p>
             <div className="flex items-center gap-2">
@@ -3228,24 +3023,6 @@ export default function App() {
                     </div>
 
                     {currentUser.role === 'ADMIN' && (
-                      <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 space-y-3">
-                        <h4 className="font-bold text-xs uppercase tracking-wider text-emerald-600 flex items-center gap-2">
-                          <Database className="w-4 h-4" /> Cloud Supabase
-                        </h4>
-                        <p className="text-[10px] text-emerald-700">Synchronisez vos utilisateurs et projets avec votre base de données Cloud.</p>
-                        <button 
-                          onClick={handleMigrateToSupabase}
-                          disabled={isMigrating || supabaseStatus !== 'connected'}
-                          className={`w-full py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                            isMigrating ? 'bg-emerald-200 text-emerald-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                          }`}
-                        >
-                          {isMigrating ? 'Migration en cours...' : 'Migrer vers Supabase'}
-                        </button>
-                      </div>
-                    )}
-
-                    {currentUser.role === 'ADMIN' && (
                       <div className="p-4 bg-red-50 rounded-2xl border border-red-100 space-y-3">
                         <h4 className="font-bold text-xs uppercase tracking-wider text-red-400">Actions Critiques</h4>
                         <div className="space-y-2">
@@ -3262,6 +3039,50 @@ export default function App() {
                         </div>
                       </div>
                     )}
+                  </div>
+                </div>
+
+                {/* Publication Section */}
+                <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5 space-y-6 md:col-span-2">
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Share2 className="w-5 h-5 text-blue-600" />
+                    Publication & Partage
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="p-6 bg-blue-50 rounded-2xl border border-blue-100 space-y-4">
+                      <h4 className="font-bold text-sm text-blue-800">Votre application est en ligne !</h4>
+                      <p className="text-xs text-blue-600 leading-relaxed">
+                        Cette application est déjà hébergée sur Google Cloud. Vous pouvez la partager avec vos collègues en utilisant l'URL de partage fournie dans votre interface AI Studio.
+                      </p>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => {
+                            const url = window.location.origin;
+                            navigator.clipboard.writeText(url);
+                            setMessage({ type: 'success', text: 'Lien copié dans le presse-papier !' });
+                            setTimeout(() => setMessage(null), 3000);
+                          }}
+                          className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Copier le lien
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-6 bg-gray-50 rounded-2xl border border-black/5 space-y-4">
+                      <h4 className="font-bold text-sm text-gray-800">Exporter pour un domaine propre</h4>
+                      <p className="text-xs text-gray-600 leading-relaxed">
+                        Pour publier sur votre propre domaine (ex: www.votre-entreprise.com), vous pouvez exporter le code source et l'héberger sur Firebase Hosting ou Google Cloud Platform.
+                      </p>
+                      <button 
+                        onClick={() => {
+                          alert("Pour exporter le code :\n1. Téléchargez les fichiers via l'interface AI Studio.\n2. Installez Node.js sur votre ordinateur.\n3. Exécutez 'npm install' puis 'npm run build'.\n4. Déployez le dossier 'dist' sur votre hébergeur.");
+                        }}
+                        className="w-full py-2 border border-gray-300 text-gray-700 rounded-lg text-xs font-bold hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
+                      >
+                        <BookOpen className="w-3 h-3" /> Guide d'exportation
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
