@@ -253,13 +253,12 @@ export default function App() {
   const handleDeleteEntry = async (id: number) => {
     if (!confirm('Supprimer cette écriture ?')) return;
     try {
-      const res = await fetch(`/api/journal-entries/${id}`, { method: 'DELETE' });
-      if (res.ok) {
+      const { error } = await supabaseService.deleteJournalEntry(id);
+      if (!error) {
         setMessage({ type: 'success', text: 'Écriture supprimée' });
         fetchConsultationEntries();
       } else {
-        const d = await res.json();
-        setMessage({ type: 'error', text: d.error });
+        setMessage({ type: 'error', text: error.message });
       }
     } catch (e) {
       setMessage({ type: 'error', text: 'Erreur réseau' });
@@ -269,8 +268,7 @@ export default function App() {
 
   const handleEditEntry = async (entry: any) => {
     try {
-      const res = await fetch(`/api/journal-entries/${entry.id}/transactions`);
-      const transactions = await res.json();
+      const transactions = await supabaseService.getEntryTransactions(entry.id);
       setEditingEntry(entry);
       setEntryDate(entry.date);
       setEntryDesc(entry.description);
@@ -283,8 +281,11 @@ export default function App() {
 
   const handleToggleUserActive = async (id: number) => {
     try {
-      const res = await fetch(`/api/users/${id}/toggle-active`, { method: 'PATCH' });
-      if (res.ok) fetchUsers();
+      const user = users.find(u => u.id === id);
+      if (user) {
+        await supabaseService.toggleUserActive(id, user.is_active);
+        fetchUsers();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -294,12 +295,8 @@ export default function App() {
     const pwd = prompt('Nouveau mot de passe temporaire:');
     if (!pwd) return;
     try {
-      const res = await fetch(`/api/users/${id}/reset-password`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newPassword: pwd })
-      });
-      if (res.ok) alert('Mot de passe réinitialisé. L\'utilisateur devra le changer à la prochaine connexion.');
+      await supabaseService.resetUserPassword(id, pwd);
+      alert('Mot de passe réinitialisé. L\'utilisateur devra le changer à la prochaine connexion.');
     } catch (e) {
       console.error(e);
     }
@@ -323,8 +320,7 @@ export default function App() {
 
   const fetchClosedPeriods = async (projectId: number) => {
     try {
-      const res = await fetch(`/api/projects/closed-periods/${projectId}`);
-      const data = await res.json();
+      const data = await supabaseService.getClosedPeriods(projectId);
       setClosedPeriods(data);
     } catch (e) {
       console.error("Failed to fetch closed periods", e);
@@ -335,18 +331,13 @@ export default function App() {
     if (!selectedProject) return;
     if (!confirm(`Voulez-vous vraiment clôturer cette période (${period}) ? Cette action est irréversible.`)) return;
     
-    const res = await fetch('/api/projects/close', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: selectedProject.id, type, period })
-    });
+    const { error } = await supabaseService.closePeriod(selectedProject.id, type, period);
     
-    if (res.ok) {
+    if (!error) {
       setMessage({ type: 'success', text: 'Période clôturée avec succès' });
       fetchClosedPeriods(selectedProject.id);
     } else {
-      const d = await res.json();
-      setMessage({ type: 'error', text: d.error });
+      setMessage({ type: 'error', text: "Erreur lors de la clôture" });
     }
     setTimeout(() => setMessage(null), 3000);
   };
@@ -373,14 +364,8 @@ export default function App() {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch('/api/users');
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setUsers(data);
-      } else {
-        console.error("Received non-array users data:", data);
-        setUsers([]);
-      }
+      const data = await supabaseService.getUsers();
+      setUsers(data);
     } catch (e) {
       console.error("Failed to fetch users", e);
       setUsers([]);
@@ -419,8 +404,7 @@ export default function App() {
     const pid = selectedProject?.id;
     if (!pid || !accountId) return;
     try {
-      const res = await fetch(`/api/lettering/${pid}?accountId=${accountId}`);
-      const data = await res.json();
+      const data = await supabaseService.getLetteringData(pid, accountId);
       setLetteringData(data);
     } catch (e) {
       console.error("Failed to fetch lettering data", e);
@@ -433,12 +417,8 @@ export default function App() {
     if (!letter) return;
 
     try {
-      const res = await fetch('/api/lettering/match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactionIds: selectedLetteringTransactions, letter: letter.toUpperCase() })
-      });
-      if (res.ok) {
+      const { error } = await supabaseService.matchTransactions(selectedLetteringTransactions, letter.toUpperCase());
+      if (!error) {
         setMessage({ type: 'success', text: 'Lettrage effectué' });
         setSelectedLetteringTransactions([]);
         fetchLetteringData(letteringAccountId);
@@ -451,12 +431,8 @@ export default function App() {
 
   const handleUnmatch = async (transactionId: number) => {
     try {
-      const res = await fetch('/api/lettering/unmatch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactionIds: [transactionId] })
-      });
-      if (res.ok) {
+      const { error } = await supabaseService.unmatchTransactions([transactionId]);
+      if (!error) {
         setMessage({ type: 'success', text: 'Lettrage annulé' });
         fetchLetteringData(letteringAccountId);
       }
@@ -472,18 +448,13 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch('/api/tiers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTier)
-      });
-      if (res.ok) {
+      const { error } = await supabaseService.createTier(newTier);
+      if (!error) {
         setMessage({ type: 'success', text: 'Tiers créé avec succès.' });
         setNewTier({ code: '', name: '', type: 'OTHER', account_id: 0 });
         fetchTiers();
       } else {
-        const err = await res.json();
-        setMessage({ type: 'error', text: err.error || 'Erreur lors de la création.' });
+        setMessage({ type: 'error', text: error.message });
       }
     } catch (e) {
       setMessage({ type: 'error', text: 'Erreur réseau.' });
@@ -493,11 +464,9 @@ export default function App() {
   const handleDeleteTier = async (id: number) => {
     if (!confirm('Supprimer ce tiers ?')) return;
     try {
-      const res = await fetch(`/api/tiers/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Tiers supprimé.' });
-        fetchTiers();
-      }
+      await supabaseService.deleteTier(id);
+      setMessage({ type: 'success', text: 'Tiers supprimé.' });
+      fetchTiers();
     } catch (e) {
       setMessage({ type: 'error', text: 'Erreur réseau.' });
     }
@@ -526,8 +495,7 @@ export default function App() {
     const pid = reportProjectId === 'all' ? 'all' : selectedProject?.id;
     if (!pid) return;
     try {
-      const res = await fetch(`/api/reports/balance/${pid}`);
-      const data = await res.json();
+      const data = await supabaseService.getBalance(pid);
       setBalanceData(data);
       setReportView('balance');
     } catch (e) {
@@ -539,9 +507,7 @@ export default function App() {
     const pid = reportProjectId === 'all' ? 'all' : selectedProject?.id;
     if (!pid) return;
     try {
-      const url = `/api/reports/ledger/${pid}${accountId ? `?accountId=${accountId}` : ''}`;
-      const res = await fetch(url);
-      const data = await res.json();
+      const data = await supabaseService.getLedger(pid, accountId);
       setLedgerData(data);
       setReportView('ledger');
     } catch (e) {
@@ -665,12 +631,8 @@ export default function App() {
   const handleUpdateTier = async () => {
     if (!editingTier) return;
     try {
-      const res = await fetch(`/api/tiers/${editingTier.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingTier)
-      });
-      if (res.ok) {
+      const { error } = await supabaseService.updateTier(editingTier.id, editingTier);
+      if (!error) {
         setMessage({ type: 'success', text: 'Tiers mis à jour' });
         setEditingTier(null);
         fetchTiers();
@@ -684,12 +646,8 @@ export default function App() {
   const handleUpdateJournal = async () => {
     if (!editingJournal) return;
     try {
-      const res = await fetch(`/api/journals/${editingJournal.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingJournal)
-      });
-      if (res.ok) {
+      const { error } = await supabaseService.updateJournal(editingJournal.id, editingJournal);
+      if (!error) {
         setMessage({ type: 'success', text: 'Journal mis à jour' });
         setEditingJournal(null);
         fetchJournals();
@@ -707,12 +665,8 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch(`/api/accounts/${editingAccount.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingAccount)
-      });
-      if (res.ok) {
+      const { error } = await supabaseService.updateAccount(editingAccount.id, editingAccount);
+      if (!error) {
         setMessage({ type: 'success', text: 'Compte mis à jour' });
         setEditingAccount(null);
         fetchAccounts();
@@ -726,12 +680,8 @@ export default function App() {
   const handleUpdateProject = async () => {
     if (!editingProject) return;
     try {
-      const res = await fetch(`/api/projects/${editingProject.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingProject)
-      });
-      if (res.ok) {
+      const { error } = await supabaseService.updateProject(editingProject.id, editingProject);
+      if (!error) {
         setMessage({ type: 'success', text: 'Projet mis à jour' });
         setEditingProject(null);
         fetchProjects();
@@ -745,12 +695,8 @@ export default function App() {
   const handleUpdateBudgetLine = async () => {
     if (!editingBudgetLine) return;
     try {
-      const res = await fetch(`/api/budget-lines/${editingBudgetLine.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ allocated_amount: editingBudgetLine.allocated_amount })
-      });
-      if (res.ok) {
+      const { error } = await supabaseService.updateBudgetLine(editingBudgetLine.id, { allocated_amount: editingBudgetLine.allocated_amount });
+      if (!error) {
         setMessage({ type: 'success', text: 'Ligne budgétaire mise à jour' });
         setEditingBudgetLine(null);
         if (selectedProject) {
@@ -765,31 +711,25 @@ export default function App() {
   };
 
   const handleCreateProject = async () => {
-    const res = await fetch('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newProject)
-    });
-    if (res.ok) {
+    const { error } = await supabaseService.createProject(newProject);
+    if (!error) {
       setMessage({ type: 'success', text: 'Projet créé avec succès' });
-      setNewProject({ code: '', name: '', description: '' });
+      setNewProject({ code: '', name: '', description: '', start_date: '', end_date: '' });
       fetchProjects();
     } else {
-      const d = await res.json();
-      setMessage({ type: 'error', text: d.error });
+      setMessage({ type: 'error', text: error.message });
     }
     setTimeout(() => setMessage(null), 3000);
   };
 
   const handleDeleteProject = async (id: number) => {
     if (!confirm('Êtes-vous sûr de vouloir supprimer ce projet ?')) return;
-    const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-    if (res.ok) {
+    const { error } = await supabaseService.deleteProject(id);
+    if (!error) {
       setMessage({ type: 'success', text: 'Projet supprimé' });
       fetchProjects();
     } else {
-      const d = await res.json();
-      setMessage({ type: 'error', text: d.error });
+      setMessage({ type: 'error', text: "Impossible de supprimer ce projet" });
     }
     setTimeout(() => setMessage(null), 3000);
   };
