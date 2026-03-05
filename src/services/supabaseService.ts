@@ -1,96 +1,107 @@
 import { supabase } from '../lib/supabase';
 
 export const supabaseService = {
-  // Users
-  async getUsers() {
+  // Authentication
+  async login(username, password) {
     const { data, error } = await supabase
       .from('users')
-      .select('*');
-    if (error) throw error;
-    return data;
-  },
-
-  async saveUser(user: any) {
-    const { data, error } = await supabase
-      .from('users')
-      .upsert(user)
-      .select()
+      .select('*')
+      .eq('username', username)
+      .eq('password', password)
       .single();
-    if (error) throw error;
-    return data;
-  },
+    
+    if (error || !data) return { error: "Identifiants invalides" };
+    if (!data.is_active) return { error: "Compte désactivé" };
 
-  async deleteUser(id: number) {
-    const { error } = await supabase
-      .from('users')
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
+    const passwordDate = new Date(data.password_updated_at);
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const passwordExpired = passwordDate < sixMonthsAgo;
+
+    return { ...data, passwordExpired };
   },
 
   // Projects
   async getProjects() {
-    const { data, error } = await supabase
-      .from('projects')
-      .select('*');
-    if (error) throw error;
-    return data;
+    const { data } = await supabase.from('projects').select('*').order('code');
+    return data || [];
   },
 
-  async saveProject(project: any) {
-    const { data, error } = await supabase
-      .from('projects')
-      .upsert(project)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
+  async createProject(project) {
+    return await supabase.from('projects').insert(project).select().single();
   },
 
-  async deleteProject(id: number) {
-    const { error } = await supabase
-      .from('projects')
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
+  // Accounts
+  async getAccounts() {
+    const { data } = await supabase.from('accounts').select('*').order('code');
+    return data || [];
   },
 
-  // Generic methods
-  async getData(table: string, query: any = '*') {
-    const { data, error } = await supabase
-      .from(table)
-      .select(query);
-    if (error) throw error;
-    return data;
+  // Journals
+  async getJournals() {
+    const { data } = await supabase.from('journals').select('*').order('code');
+    return data || [];
   },
 
-  async saveData(table: string, payload: any) {
-    const { data, error } = await supabase
-      .from(table)
-      .upsert(payload)
-      .select();
-    if (error) throw error;
-    return data;
+  // Tiers
+  async getTiers() {
+    const { data } = await supabase
+      .from('tiers')
+      .select('*, accounts(code)')
+      .order('code');
+    return data?.map(t => ({ ...t, account_code: t.accounts?.code })) || [];
   },
 
-  async deleteData(table: string, id: number) {
-    const { error } = await supabase
-      .from(table)
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
-  },
-
-  // Migration helper
-  async migrateData(table: string, localData: any[]) {
-    if (!localData || localData.length === 0) return [];
+  // Budget
+  async getBudgetStatus(projectId, year) {
+    let query = supabase.from('budget_lines').select('*');
+    if (projectId !== 'all') query = query.eq('project_id', projectId);
+    if (year) query = query.eq('year', year);
     
-    // Supabase upsert handles arrays
-    const { data, error } = await supabase
-      .from(table)
-      .upsert(localData)
-      .select();
-    if (error) throw error;
-    return data;
+    const { data: lines } = await query;
+    if (!lines) return [];
+
+    // For each line, get spent amount
+    const status = await Promise.all(lines.map(async (line) => {
+      const { data: transactions } = await supabase
+        .from('transactions')
+        .select('debit')
+        .eq('budget_line_id', line.id);
+      
+      const spent = transactions?.reduce((sum, t) => sum + (t.debit || 0), 0) || 0;
+      return { ...line, spent };
+    }));
+
+    return status;
+  },
+
+  async createAccount(account) {
+    return await supabase.from('accounts').insert(account).select().single();
+  },
+
+  async createJournal(journal) {
+    return await supabase.from('journals').insert(journal).select().single();
+  },
+
+  async createTier(tier) {
+    return await supabase.from('tiers').insert(tier).select().single();
+  },
+
+  async createBudgetLine(line) {
+    return await supabase.from('budget_lines').insert(line).select().single();
+  },
+
+  async getJournalEntries(journalId, projectId) {
+    let query = supabase.from('journal_entries').select('*');
+    if (journalId) query = query.eq('journal_id', journalId);
+    if (projectId && projectId !== 'all') query = query.eq('project_id', projectId);
+    const { data } = await query.order('date', { ascending: false });
+    return data || [];
+  },
+
+  async deleteJournalEntry(id) {
+    // Should also delete transactions (Supabase cascade or manual)
+    await supabase.from('transactions').delete().eq('entry_id', id);
+    return await supabase.from('journal_entries').delete().eq('id', id);
   }
 };

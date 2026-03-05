@@ -31,6 +31,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabaseService } from './services/supabaseService';
 
 type Project = {
   id: number;
@@ -176,13 +177,10 @@ export default function App() {
     const password = formData.get('password') as string;
 
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-      if (res.ok) {
+      const data = await supabaseService.login(username, password);
+      if (data.error) {
+        setLoginError(data.error);
+      } else {
         if (data.passwordExpired) {
           setPasswordExpired(true);
           setCurrentUser(data);
@@ -190,11 +188,9 @@ export default function App() {
           setCurrentUser(data);
           setLoginError(null);
         }
-      } else {
-        setLoginError(data.error);
       }
     } catch (e) {
-      setLoginError("Erreur de connexion au serveur");
+      setLoginError("Erreur de connexion à Supabase");
     }
   };
 
@@ -247,8 +243,7 @@ export default function App() {
   const fetchConsultationEntries = async () => {
     if (!entryJournalId) return;
     try {
-      const res = await fetch(`/api/journal-entries?journalId=${entryJournalId}&projectId=${entryProjectId || 'all'}`);
-      const data = await res.json();
+      const data = await supabaseService.getJournalEntries(entryJournalId, entryProjectId || 'all');
       setConsultationEntries(data);
     } catch (e) {
       console.error("Failed to fetch entries", e);
@@ -368,8 +363,7 @@ export default function App() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects');
-      const data = await res.json();
+      const data = await supabaseService.getProjects();
       setProjects(data);
       if (data.length > 0 && !selectedProject) setSelectedProject(data[0]);
     } catch (e) {
@@ -395,8 +389,7 @@ export default function App() {
 
   const fetchAccounts = async () => {
     try {
-      const res = await fetch('/api/accounts');
-      const data = await res.json();
+      const data = await supabaseService.getAccounts();
       setAccounts(data);
     } catch (e) {
       console.error("Failed to fetch accounts", e);
@@ -405,8 +398,7 @@ export default function App() {
 
   const fetchJournals = async () => {
     try {
-      const res = await fetch('/api/journals');
-      const data = await res.json();
+      const data = await supabaseService.getJournals();
       setJournals(data);
       if (data.length > 0) setEntryJournalId(data[0].id);
     } catch (e) {
@@ -416,8 +408,7 @@ export default function App() {
 
   const fetchTiers = async () => {
     try {
-      const res = await fetch('/api/tiers');
-      const data = await res.json();
+      const data = await supabaseService.getTiers();
       setTiers(data);
     } catch (e) {
       console.error("Failed to fetch tiers", e);
@@ -514,8 +505,7 @@ export default function App() {
 
   const fetchBudgetStatus = async (projectId: number | 'all', year?: number) => {
     try {
-      const res = await fetch(`/api/budget-status/${projectId}${year ? `?year=${year}` : ''}`);
-      const data = await res.json();
+      const data = await supabaseService.getBudgetStatus(projectId, year);
       setBudgetStatus(data);
     } catch (e) {
       console.error("Failed to fetch budget status", e);
