@@ -203,6 +203,7 @@ async function startServer() {
   const userCount = db.prepare("SELECT count(*) as count FROM users").get() as { count: number };
   if (userCount.count === 0) {
     db.prepare("INSERT INTO users (username, password, role, is_active, password_updated_at) VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)").run("admin", "admin", "ADMIN");
+    db.prepare("INSERT INTO users (username, password, role, is_active, password_updated_at) VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)").run("cedniho91@gmail.com", "admin123", "ADMIN");
     
     const journals = [
       { code: "GEN", name: "Journal Général" },

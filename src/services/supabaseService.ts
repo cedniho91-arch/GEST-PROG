@@ -3,261 +3,285 @@ import { supabase } from '../lib/supabase';
 export const supabaseService = {
   // Authentication
   async login(username, password) {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('username', username)
-      .eq('password', password)
-      .single();
-    
-    if (error || !data) return { error: "Identifiants invalides" };
-    if (!data.is_active) return { error: "Compte désactivé" };
-
-    const passwordDate = new Date(data.password_updated_at);
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const passwordExpired = passwordDate < sixMonthsAgo;
-
-    return { ...data, passwordExpired };
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      return { error: err.error || "Identifiants invalides" };
+    }
+    return await res.json();
   },
 
   // Projects
   async getProjects() {
-    const { data } = await supabase.from('projects').select('*').order('code');
-    return data || [];
+    const res = await fetch('/api/projects');
+    return await res.json();
   },
 
   async createProject(project) {
-    return await supabase.from('projects').insert(project).select().single();
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(project)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  async updateProject(id, project) {
+    const res = await fetch(`/api/projects/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(project)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  async deleteProject(id) {
+    const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   // Accounts
   async getAccounts() {
-    const { data } = await supabase.from('accounts').select('*').order('code');
-    return data || [];
+    const res = await fetch('/api/accounts');
+    return await res.json();
+  },
+
+  async createAccount(account) {
+    const res = await fetch('/api/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(account)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  async updateAccount(id, account) {
+    const res = await fetch(`/api/accounts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(account)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  async deleteAccount(id) {
+    const res = await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   // Journals
   async getJournals() {
-    const { data } = await supabase.from('journals').select('*').order('code');
-    return data || [];
+    const res = await fetch('/api/journals');
+    return await res.json();
+  },
+
+  async createJournal(journal) {
+    const res = await fetch('/api/journals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(journal)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  async updateJournal(id, journal) {
+    const res = await fetch(`/api/journals/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(journal)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  async deleteJournal(id) {
+    const res = await fetch(`/api/journals/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   // Tiers
   async getTiers() {
-    const { data } = await supabase
-      .from('tiers')
-      .select('*, accounts(code)')
-      .order('code');
-    return data?.map(t => ({ ...t, account_code: t.accounts?.code })) || [];
+    const res = await fetch('/api/tiers');
+    return await res.json();
+  },
+
+  async createTier(tier) {
+    const res = await fetch('/api/tiers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tier)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  async updateTier(id, tier) {
+    const res = await fetch(`/api/tiers/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tier)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  async deleteTier(id) {
+    const res = await fetch(`/api/tiers/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   // Budget
   async getBudgetStatus(projectId, year) {
-    let query = supabase.from('budget_lines').select('*');
-    if (projectId !== 'all') query = query.eq('project_id', projectId);
-    if (year) query = query.eq('year', year);
-    
-    const { data: lines } = await query;
-    if (!lines) return [];
-
-    // For each line, get spent amount
-    const status = await Promise.all(lines.map(async (line) => {
-      const { data: transactions } = await supabase
-        .from('transactions')
-        .select('debit')
-        .eq('budget_line_id', line.id);
-      
-      const spent = transactions?.reduce((sum, t) => sum + (t.debit || 0), 0) || 0;
-      return { ...line, spent };
-    }));
-
-    return status;
-  },
-
-  async createAccount(account) {
-    return await supabase.from('accounts').insert(account).select().single();
-  },
-
-  async createJournal(journal) {
-    return await supabase.from('journals').insert(journal).select().single();
-  },
-
-  async createTier(tier) {
-    return await supabase.from('tiers').insert(tier).select().single();
+    const res = await fetch(`/api/budget-status/${projectId}${year ? `?year=${year}` : ''}`);
+    return await res.json();
   },
 
   async createBudgetLine(line) {
-    return await supabase.from('budget_lines').insert(line).select().single();
+    const res = await fetch('/api/budget-lines', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(line)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
+  async updateBudgetLine(id, line) {
+    const res = await fetch(`/api/budget-lines/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(line)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  async deleteBudgetLine(id) {
+    const res = await fetch(`/api/budget-lines/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
+  },
+
+  // Journal Entries
   async getJournalEntries(journalId, projectId) {
-    let query = supabase.from('journal_entries').select('*');
-    if (journalId) query = query.eq('journal_id', journalId);
-    if (projectId && projectId !== 'all') query = query.eq('project_id', projectId);
-    const { data } = await query.order('date', { ascending: false });
-    return data || [];
+    const res = await fetch(`/api/journal-entries?journalId=${journalId}&projectId=${projectId}`);
+    return await res.json();
+  },
+
+  async createJournalEntry(entry) {
+    const res = await fetch('/api/journal-entries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   async deleteJournalEntry(id) {
-    await supabase.from('transactions').delete().eq('entry_id', id);
-    return await supabase.from('journal_entries').delete().eq('id', id);
+    const res = await fetch(`/api/journal-entries/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   async getEntryTransactions(entryId) {
-    const { data } = await supabase.from('transactions').select('*').eq('entry_id', entryId);
-    return data || [];
+    const res = await fetch(`/api/journal-entries/${entryId}/transactions`);
+    return await res.json();
   },
 
   // Users
   async getUsers() {
-    const { data } = await supabase.from('users').select('id, username, role, is_active, password_updated_at');
-    return data || [];
+    const res = await fetch('/api/users');
+    return await res.json();
   },
 
   async createUser(user) {
-    return await supabase.from('users').insert(user).select().single();
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user)
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   async toggleUserActive(id, currentStatus) {
-    return await supabase.from('users').update({ is_active: !currentStatus }).eq('id', id);
+    const res = await fetch(`/api/users/${id}/toggle-active`, { method: 'PATCH' });
+    return await res.json();
   },
 
   async resetUserPassword(id, newPassword) {
-    return await supabase.from('users').update({ password: newPassword, password_updated_at: '1970-01-01' }).eq('id', id);
+    const res = await fetch(`/api/users/${id}/reset-password`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newPassword })
+    });
+    return await res.json();
   },
 
   // Periods
   async getClosedPeriods(projectId) {
-    const { data } = await supabase.from('closed_periods').select('*').eq('project_id', projectId).order('period', { ascending: false });
-    return data || [];
+    const res = await fetch(`/api/projects/closed-periods/${projectId}`);
+    return await res.json();
   },
 
   async closePeriod(projectId, type, period) {
-    return await supabase.from('closed_periods').insert({ project_id: projectId, type, period, closed_at: new Date().toISOString() });
+    const res = await fetch('/api/projects/close', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId, type, period })
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   // Lettering
   async getLetteringData(projectId, accountId) {
-    const { data } = await supabase
-      .from('transactions')
-      .select(`
-        id,
-        letter,
-        debit,
-        credit,
-        journal_entries (
-          date,
-          reference,
-          description
-        ),
-        accounts (
-          code,
-          name
-        )
-      `)
-      .eq('account_id', accountId)
-      .eq('journal_entries.project_id', projectId);
-    
-    return data?.map(t => ({
-      transaction_id: t.id,
-      date: t.journal_entries?.date,
-      reference: t.journal_entries?.reference,
-      description: t.journal_entries?.description,
-      debit: t.debit,
-      credit: t.credit,
-      letter: t.letter,
-      account_code: t.accounts?.code,
-      account_name: t.accounts?.name
-    })) || [];
+    const res = await fetch(`/api/lettering/${projectId}?accountId=${accountId}`);
+    return await res.json();
   },
 
   async matchTransactions(transactionIds, letter) {
-    return await supabase.from('transactions').update({ letter }).in('id', transactionIds);
+    const res = await fetch('/api/lettering/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transactionIds, letter })
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   async unmatchTransactions(transactionIds) {
-    return await supabase.from('transactions').update({ letter: null }).in('id', transactionIds);
+    const res = await fetch('/api/lettering/unmatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transactionIds })
+    });
+    const data = await res.json();
+    return { data, error: res.ok ? null : { message: data.error } };
   },
 
   // Reports
   async getBalance(projectId) {
-    const { data } = await supabase.rpc('get_balance', { p_id: projectId === 'all' ? null : projectId });
-    return data || [];
+    const res = await fetch(`/api/reports/balance/${projectId}`);
+    return await res.json();
   },
 
   async getLedger(projectId, accountId) {
-    let query = supabase
-      .from('transactions')
-      .select(`
-        debit,
-        credit,
-        journal_entries (
-          date,
-          reference,
-          description,
-          project_id
-        ),
-        accounts (
-          code,
-          name
-        )
-      `);
-    
-    if (projectId !== 'all') query = query.eq('journal_entries.project_id', projectId);
-    if (accountId) query = query.eq('account_id', accountId);
-
-    const { data } = await query.order('journal_entries(date)', { ascending: true });
-    
-    return data?.map(t => ({
-      account_code: t.accounts?.code,
-      account_name: t.accounts?.name,
-      date: t.journal_entries?.date,
-      reference: t.journal_entries?.reference,
-      description: t.journal_entries?.description,
-      debit: t.debit,
-      credit: t.credit
-    })) || [];
-  },
-
-  // Updates & Deletes
-  async updateTier(id, tier) {
-    return await supabase.from('tiers').update(tier).eq('id', id);
-  },
-
-  async deleteTier(id) {
-    return await supabase.from('tiers').delete().eq('id', id);
-  },
-
-  async updateJournal(id, journal) {
-    return await supabase.from('journals').update(journal).eq('id', id);
-  },
-
-  async deleteJournal(id) {
-    return await supabase.from('journals').delete().eq('id', id);
-  },
-
-  async updateAccount(id, account) {
-    return await supabase.from('accounts').update(account).eq('id', id);
-  },
-
-  async deleteAccount(id) {
-    return await supabase.from('accounts').delete().eq('id', id);
-  },
-
-  async updateProject(id, project) {
-    return await supabase.from('projects').update(project).eq('id', id);
-  },
-
-  async deleteProject(id) {
-    return await supabase.from('projects').delete().eq('id', id);
-  },
-
-  async updateBudgetLine(id, line) {
-    return await supabase.from('budget_lines').update(line).eq('id', id);
-  },
-
-  async deleteBudgetLine(id) {
-    return await supabase.from('budget_lines').delete().eq('id', id);
+    const res = await fetch(`/api/reports/ledger/${projectId}${accountId ? `?accountId=${accountId}` : ''}`);
+    return await res.json();
   }
 };
